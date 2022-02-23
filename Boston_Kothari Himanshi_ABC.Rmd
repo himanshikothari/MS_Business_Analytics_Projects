@@ -1,0 +1,225 @@
+---
+title: "Boston Case"
+author: "himanshi"
+date: "18/02/2022"
+output: html_document
+---
+
+```{r init}
+library(MASS)
+data(Boston)
+attach(Boston)
+
+head(Boston)
+str(Boston)
+dim(Boston)
+
+
+
+set.seed(14529802)
+data1 <- sample(nrow(Boston),nrow(Boston)*0.80)
+Boston_train <- Boston[data1,]
+Boston_test <- Boston[-data1,]
+```
+
+# Full Model
+```{r full}
+
+model_full <-lm(medv~.,data<- Boston_train)
+model_summary_full <- summary(model_full)
+model_summary_full
+AIC(model_full); BIC(model_full)
+
+yhat_full <- predict(object = model_full, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_full <- sum((Boston_train$medv-yhat_full)^2)/(n-2-1)
+mse_full
+
+
+# Diagnostic plot
+plot(model_full)
+
+#Model Assessment
+model_summary_full$sigma^2
+model_summary_full$r.squared
+model_summary_full$adj.r.squared
+
+```
+
+# Null Model
+```{r null}
+model_null <-lm(medv~1,data<- Boston_train)
+model_summary_null <- summary(model_null)
+model_summary_null
+AIC(model_null); BIC(model_null)
+
+yhat_null <- predict(object = model_null, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_null <- sum((Boston_train$medv-yhat_null)^2)/(n-2-1)
+mse_null
+
+
+# Diagnostic plot
+plot(model_null)
+
+#Model Assessment
+model_summary_null$sigma^2
+model_summary_null$r.squared
+model_summary_null$adj.r.squared
+
+```
+
+# Best subset BIC model
+```{r subset bic}
+library(leaps)
+
+best_subset_bic <- regsubsets(medv~.,data=Boston_train, nbest=1, nvmax = 13)
+summ_bs_bic<-summary(best_subset_bic)
+summ_bs_bic$bic
+data.frame(BIC = which.min(summ_bs_bic$bic))
+plot(best_subset_bic, scale="bic", main = "Best Subset Models")
+
+summary(best_subset_bic)
+
+
+#Best model: crim+zn+chas+nox+rm+dis+rad+tax+ptratio+black+lstat
+#MSE
+best_subset_model <- lm(medv ~ crim+zn+chas+nox+rm+dis+rad+tax+ptratio+black+lstat , data = Boston_train)
+bsm <- summary(best_subset_model)
+yhat_bsm <- predict(object = best_subset_model, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_bsm <- sum((Boston_train$medv-yhat_bsm)^2)/(n-2-1)
+mse_bsm
+
+```
+
+# Stepwise AIC
+```{r aic}
+stepwise_aic <- step(model_full,data=Boston_train) #k=2, default AIC
+best_stepwise_aic <- lm(medv ~ crim+ zn+ chas+ nox+ rm+ dis+ rad+ tax+ ptratio+ black+ lstat, data = Boston_train)
+step_aic <- summary(best_stepwise_aic)
+yhat_aic <- predict(object = best_stepwise_aic, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_aic <- sum((Boston_train$medv-yhat_aic)^2)/(n-2-1)
+mse_aic
+
+```
+
+# Stepwise BIC
+```{r bic}
+stepwise_bic <- step(model_full,data=Boston_train,k=log(n)) #k=log(n)
+best_stepwise_bic <- lm(medv ~ crim+ zn+ chas+ nox+ rm+ dis+ rad+ tax+ ptratio+ black+ lstat, data = Boston_train)
+step_bic <- summary(best_stepwise_bic)
+yhat_bic <- predict(object = best_stepwise_bic, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_bic <- sum((Boston_train$medv-yhat_bic)^2)/(n-2-1)
+mse_bic
+
+```
+
+# LASSO
+```{r lasso}
+library(glmnet)
+
+library(plotmo)
+
+
+x_as = as.matrix(Boston_train[, -c(which(colnames(Boston_train)=='medv'))])
+
+lasso_fit <- glmnet(x = x_as, y = Boston_train$medv, alpha = 1)
+coef(lasso_fit,s=0.5)
+coef(lasso_fit,s=1)
+plot(lasso_fit, label = TRUE)
+
+cv_lasso_fit <- cv.glmnet(x = x_as, y = Boston_train$medv, alpha = 1, nfolds = 5)
+lambda.min<- cv_lasso_fit$lambda.min
+lambda.1se<- cv_lasso_fit$lambda.1se
+coef(cv_lasso_fit,s=lambda.min)
+coef(cv_lasso_fit,s=lambda.1se)
+
+plot(cv_lasso_fit, label = TRUE)
+
+
+# plot_glmnet(cv_lasso_fit, label = TRUE)
+plot_glmnet(lasso_fit, label=TRUE)
+
+## Lambda Min model
+lamda.min.model <- lm(medv ~ crim+ zn+ chas+ indus+ nox+ rm+ age+ dis+ rad+ tax+ ptratio+ black+ lstat, data = Boston_train)
+yhat_min <- predict(object = lamda.min.model, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+mse_min <- sum((Boston_train$medv-yhat_min)^2)/(n-2-1)
+mse_min
+
+## Lambda 1se model
+lamda.1se.model <- lm(medv ~ crim+ chas+ nox+ rm+ dis+ tax+ ptratio+ black+ lstat, data = Boston_train)
+yhat_1se <- predict(object = lamda.1se.model, newdata = Boston_train) 
+n <- dim(Boston_train)[1]
+n
+mse_1se <- sum((Boston_train$medv-yhat_1se)^2)/(n-2-1)
+mse_1se
+
+
+```
+
+##### Based on the above observations, we see that LASSO model with lambda.min has the best in-sample MSE and hence, it would be a good choice to select it.
+
+# Out-of-Sample Testing
+```{r LASSO test}
+yhat_min_test <- predict(object = lamda.min.model, newdata = Boston_test) 
+n <- dim(Boston_test)[1]
+n
+mspe_min <- sum((Boston_test$medv-yhat_min_test)^2)/(n-2-1)
+mspe_min
+```
+
+# Cross Validation
+```{r cv}
+cv_fit <- cv.glmnet(x = as.matrix(Boston[, -c(which(colnames(Boston)=='medv'))]), y = Boston$medv, alpha = 1, nfolds = 5)
+cv_fit
+```
+
+# Regression Tree
+```{r cart}
+# install.packages('rpart')
+# install.packages('rpart.plot') 
+library(rpart)
+library(rpart.plot)
+boston_rpart <- rpart(formula = medv ~ ., data = Boston_train)
+boston_rpart
+prp(boston_rpart,digits = 4, extra = 1)
+plotcp(boston_rpart)
+printcp(boston_rpart)
+final_tree<-prune(boston_rpart, cp=0.018661)
+prp(final_tree,digits = 4, extra = 1)
+yhat_cart <- predict(object = final_tree, newdata = Boston_train)
+mse_cart <- sum((Boston_train$medv-yhat_cart)^2)/(n-2-1)
+mse_cart
+yhat_cart_test <- predict(object = final_tree, newdata = Boston_test)
+mspe_cart <- sum((Boston_test$medv-yhat_cart_test)^2)/(n-2-1)
+mspe_cart
+```
+
+# Full Data Comparison
+## CART
+```{r cart full data}
+boston_fulltree <- rpart(formula = medv ~ ., data = Boston)
+boston_fulltree
+prp(boston_fulltree,digits = 4, extra = 1)
+plotcp(boston_fulltree)
+printcp(boston_fulltree)
+final_full_tree<-prune(boston_fulltree, cp=0.015851)
+prp(final_full_tree,digits = 4, extra = 1)
+yhat_cart_full <- predict(object = final_full_tree, newdata = Boston)
+mse_cart_full <- sum((Boston$medv-yhat_cart_full)^2)/(n-2-1)
+mse_cart_full
+```
+
+## LASSO lambda.min best model LM
+```{r lasso full data}
+lamda.min.model_final <- lm(medv ~ crim+ zn+ chas+ indus+ nox+ rm+ age+ dis+ rad+ tax+ ptratio+ black+ lstat, data = Boston)
+yhat_full_min <- predict(object = lamda.min.model_final, newdata = Boston) 
+n <- dim(Boston)[1]
+n
+mse_min_full <- sum((Boston$medv-yhat_full_min)^2)/(n-2-1)
+mse_min_full
+```
