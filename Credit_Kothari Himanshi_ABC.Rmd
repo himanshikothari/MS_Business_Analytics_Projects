@@ -1,0 +1,173 @@
+---
+title: "Credit Card case"
+author: "himanshi"
+date: "18/02/2022"
+output: html_document
+---
+
+```{r init}
+cred <- read.csv("C:/Users/himan/OneDrive - University of Cincinnati/Desktop/PD Data/Machine Learning and Data Science/PGDBA Documents/Masters Documents/Cincinnati/Data Mining/credit_default.csv")
+library(dplyr)
+summary(cred)
+dim(cred)
+sum(cred$default.payment.next.month)
+str(cred)
+
+cred$SEX<- as.factor(cred$SEX)
+cred$EDUCATION<- as.factor(cred$EDUCATION)
+cred$MARRIAGE<- as.factor(cred$MARRIAGE)
+cred<- rename(cred, default=default.payment.next.month)
+
+```
+
+# Sampling & EDA
+```{r sampEDA}
+
+##A1
+#Random sampling
+set.seed(14529802)
+data1 <- sample(nrow(cred),nrow(cred)*0.80)
+credit_train <- cred[data1,]
+credit_test <- cred[-data1,]
+
+
+#EDA
+summary(credit_train)
+hist(credit_train$default)
+hist(credit_train$PAY_0)
+barplot(prop.table(table(credit_train$EDUCATION)))
+
+str(credit_train)
+
+table(credit_train$default)
+table(credit_train$PAY_0)
+table(credit_train$EDUCATION)
+
+```
+
+# Training Data Analysis
+```{r training}
+library(rpart)
+library(rpart.plot)
+
+credit_rpart0 <- rpart(formula = default ~ ., data = credit_train, method = "class")
+
+credit_rpart <- rpart(formula = default ~ . , data = credit_train, method = "class", parms = list(loss=matrix(c(0,5,1,0), nrow = 2)))
+credit_rpart
+prp(credit_rpart, extra = 1)
+```
+
+# ROC Cuve
+```{r roc}
+library(ROCR)
+credit_train_prob_rpart = predict(credit_rpart, credit_train, type="prob")
+pred = prediction(credit_train_prob_rpart[,2], credit_train$default)
+perf = performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+slot(performance(pred, "auc"), "y.values")[[1]]
+
+```
+
+# Asymmetric Cost
+```{r asymmetric}
+cost <- function(r, phat){
+  weight1 <- 5
+  weight0 <- 1
+  pcut <- weight0/(weight1+weight0) 
+  c1 <- (r==1)&(phat<pcut) #logical vector - true if actual 1 but predict 0
+  c0 <-(r==0)&(phat>pcut) #logical vector - true if actual 0 but predict 1
+  return(mean(weight1*c1+weight0*c0))
+}
+table(credit_train$default, (credit_train_prob_rpart[,2] > (1/6))*1, dnn=c("Truth","Predicted"))
+
+cost(credit_train$default, predict(credit_rpart, credit_train, type="prob"))
+```
+
+# Out of Sample test
+```{r outsample}
+
+library(ROCR)
+credit_test_prob_rpart = predict(credit_rpart, credit_test, type="prob")
+pred = prediction(credit_test_prob_rpart[,2], credit_test$default)
+perf = performance(pred, "tpr", "fpr")
+plot(perf, colorize=TRUE)
+slot(performance(pred, "auc"), "y.values")[[1]]
+
+
+cost(credit_test$default, predict(credit_rpart, credit_test, type="prob"))
+```
+
+# Best Logistic Model
+```{r log}
+credit_glm1 <- glm(default~., family=binomial, data=credit_train)
+credit_glm_back <- step(credit_glm1) # backward selection (if you don't specify anything)
+summary(credit_glm_back)
+credit_glm_back$deviance
+AIC(credit_glm_back)
+BIC(credit_glm_back)
+
+in_sample_mean_back <- credit_glm_back$dev/credit_glm_back$df.residual
+in_sample_mean_back
+
+glm_AIC_Step<- predict(credit_glm_back, newdata=credit_test, type="response")
+
+
+pred <- prediction(glm_AIC_Step, credit_test$default)
+perf <- performance(pred, "tpr", "fpr")
+
+#Get the AUC
+AUC_test <- unlist(slot(performance(pred, "auc"), "y.values"))
+AUC_test
+
+pcut2 <- 1/(5+1) #prespecify pcut value, cost ratio 5:1
+cost2 <- function(r, pi){
+  weight1 <- 5
+  weight0 <- 1
+  c1 <- (r==1)&(pi<pcut2) #logical vector - true if actual 1 but predict 0
+  c0 <-(r==0)&(pi>pcut2) #logical vector - true if actual 0 but predict 1
+  return(mean(weight1*c1+weight0*c0))
+}
+
+#Asymmetric cost
+Asymmetric_cost <- cost2(r = credit_test$default, pi = glm_AIC_Step)
+Asymmetric_cost
+```
+
+# Full data CART
+```{r}
+library(rpart)
+library(rpart.plot)
+
+credit_rpart <- rpart(formula = default ~ . , data = cred, method = "class", parms = list(loss=matrix(c(0,5,1,0), nrow = 2)))
+credit_rpart
+prp(credit_rpart, extra = 1)
+cred_prob_rpart = predict(credit_rpart, cred, type="prob")
+pred = prediction(cred_prob_rpart[,2], cred$default)
+perf = performance(pred, "tpr", "fpr")
+AUC_test <- unlist(slot(performance(pred, "auc"), "y.values"))
+AUC_test
+
+cost(cred$default, predict(credit_rpart, cred, type="prob"))
+```
+
+
+# Full data AIC
+```{r}
+
+glm_AIC_Step<- predict(credit_glm_back, newdata=cred, type="response")
+
+
+pred <- prediction(glm_AIC_Step, cred$default)
+perf <- performance(pred, "tpr", "fpr")
+
+#Get the AUC
+AUC_test <- unlist(slot(performance(pred, "auc"), "y.values"))
+AUC_test
+
+#Asymmetric cost
+Asymmetric_cost <- cost2(r = cred$default, pi = glm_AIC_Step)
+Asymmetric_cost
+```
+
+
+
