@@ -1,0 +1,517 @@
+---
+title: "Statistical Modeling HW2"
+author: "Group 10: Soumi Giri + Himanshi Kothari + Robert Koenig + Mihir Patel + Nina Brillhart"
+date: "2/11/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Loading Libraries and data
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(reshape2)
+library(gt)
+library(scales)
+library(glmnet)
+library(Hmisc)
+library(corrplot)
+library(MASS)
+library(rms)
+
+bank_data <- read.csv("C:/Users/himan/OneDrive - University of Cincinnati/Desktop/PD Data/Machine Learning and Data Science/PGDBA Documents/Masters Documents/Cincinnati/Stat Modeling/bank_trn.csv", stringsAsFactors = TRUE)
+```
+
+## Exploratory data analysis
+
+```{r}
+summary(bank_data)
+
+colnames(bank_data)
+```
+
+Observations:
+
+1. No missing values
+2. Character fields to be changed to factors
+3. 11 categorical variables 10 numeric variable
+
+Observing effect on response variable - subscribed
+
+```{r}
+## Effect of Age
+
+table(bank_data$age)
+
+bank_data %>% mutate(age_group = ifelse(age < 25, "17 - 25", 
+                                        ifelse(age < 35, "25 - 35", 
+                                               ifelse(age < 45, "35 - 45",
+                                                      ifelse(age < 55, "45 - 55",
+                                                             ifelse(age < 65, "55 - 65",
+                                                                    ifelse(age < 75, "65 - 75",
+                                                                           ifelse(age < 85, "75 - 85", "85-100")))))))) %>% 
+  group_by(age_group, subscribed) %>% 
+  summarise(count = n()) %>%  
+  ggplot(aes(x = age_group, y = count, fill = subscribed)) +
+  geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Age group", y = "% Customers", title = "Fig 1: Effect of age on subscription")
+
+
+bank_data %>% mutate(age_group = ifelse(age < 25, "17 - 25", 
+                                        ifelse(age < 35, "25 - 35", 
+                                               ifelse(age < 45, "35 - 45",
+                                                      ifelse(age < 55, "45 - 55",
+                                                             ifelse(age < 65, "55 - 65",
+                                                                    ifelse(age < 75, "65 - 75",
+                                                                           ifelse(age < 85, "75 - 85", "85-100")))))))) %>% 
+  group_by(age_group) %>% summarise(count = n(), percent = n()/37070)  %>% 
+  gt()
+
+```
+
+Observation - We note age groups from 65 - 100 has higher subscription rate but around 85% of our customer are in the age range of 17 - 65.
+
+```{r}
+## Effect of job  
+
+customers <- dim(bank_data)[1]
+
+table(bank_data$job)
+
+bank_data %>% group_by(job, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = job, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x = "Job", y = "% Customers", title = "Fig 2: Effect of job on subscription")
+```
+
+Observation - Under the job section we note the "retired" group has high subscription which is inline with the higher subscription rate in the older age group. The next high subscription rate is observed among students at about 30%. Rest job groups show similar subscription rate of 10% - 15%.
+
+```{r}
+## Effect of marital status
+
+table(bank_data$marital)
+
+
+bank_data %>% group_by(marital, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = marital, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Marital", y = "% Customers", title = "Fig 3: Effect of marital status on subscription")
+```
+
+There are 4 marital status. Most of our observation lies in divorced, married and single status. We have 76 observations in the *unknown* category. We don't observe any obvious impact on the subscription rate on marital status.
+
+```{r}
+## Effect of education
+
+table(bank_data$education)
+
+bank_data %>% group_by(education, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = education, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x = "Education Level", y = "% Customers", title = "Fig 4: Effect of education level on subscription")
+```
+
+The subscript rate shows high among people with not education background. But in our data we only have 18 customers against *illiterate* group hence we will not assume much significance against this observation. For the rest of the groups we don't see any major impact of education of the subscription rate.
+
+```{r}
+## Effect of default
+
+table(bank_data$default)
+
+bank_data %>% group_by(default, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = default, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  labs(x = "Default credit status", y = "% Customers", title = "Fig 5: Effect of default credit on subscription")
+```
+
+Our data is skewed heavily towards customers with no credit default. Around 20% of the data has customers with no credit default history which shows as *unknown* and 3 customers with default customer.
+
+```{r}
+## Effect of housing
+
+table(bank_data$housing)
+
+bank_data %>% group_by(housing, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = housing, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Housing", y = "% Customers", title = "Fig 6: Effect of housing status on subscription")
+
+```
+
+subscription rate doesn't show variation across the housing status of customer.
+
+```{r}
+## Effect of loan
+
+table(bank_data$loan)
+
+bank_data %>% group_by(loan, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = loan, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Loan", y = "% Customers", title = "Fig 7: Effect of loan status on subscription")
+
+```
+No significant impact on subscription rate.
+
+```{r}
+## Effect of Contact
+
+table(bank_data$contact)
+
+bank_data %>% group_by(contact, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = contact, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Contact type", y = "% Customers", title = "Fig 8: Effect of contact type on subscription")
+```
+
+People with cellular shows more subscription rate than people with telephone.
+
+```{r}
+## Effect of Month
+
+bank_data$month <- ordered(bank_data$month, levels = c("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))
+
+table(bank_data$month)
+
+bank_data %>% group_by(month, subscribed) %>% summarise(cust = n()) %>% 
+  ggplot(aes(x = month, y = cust, fill = subscribed)) +
+    geom_bar(position = "fill", stat = "identity") +
+  labs(x = "Month", y = "% Customers", title = "Fig 8: Effect of month on subscription")
+
+subscribed_cust <- length(bank_data$subscribed[bank_data$subscribed == "yes"])
+
+bank_data %>% group_by(month) %>% filter(subscribed == "yes") %>% summarise(cust = n()/subscribed_cust) %>% 
+  ggplot(aes(x = month, y = cust)) +
+    geom_bar(stat = "identity") +
+  labs(x = "Month", y = "% Customers overall customers subscribed", title = "Fig 9: Overall subscription rate over months")
+```
+
+In our data we don't have any data corresponding January and February. We see a strong effect of month on the subscription rate - March, September, October and December shows around 50% subscription rate. 
+
+Out of all the subscription gained highest uplift was observed in the month of May.
+
+```{r}
+## Effect of Day of Week
+
+bank_data %>% 
+  group_by(day_of_week) %>% 
+    summarise(by_day_of_week =  round(mean(subscribed == 'yes')*100,1),
+              counts = n())
+
+## Effect of p outcome
+
+bank_data %>% 
+  group_by(poutcome) %>% 
+    summarise(by_poutcome =  round(mean(subscribed == 'yes')*100,1),
+              counts = n())
+
+```
+Next we see the distributions and outliers for our continuous variables
+
+```{r}
+boxplot(bank_data$age,main = "Boxplot of age")
+
+boxplot(bank_data$campaign,main = "Boxplot of campaign")
+
+boxplot(bank_data$duration,main = "Boxplot of duration")
+
+boxplot(bank_data$pdays,main = "Boxplot of pdays")
+
+boxplot(bank_data$previous,main = "Boxplot of previous")
+
+hist.data.frame(bank_data[,c('age', 'duration', 'campaign', 'pdays', 'previous')])
+```
+
+Observations:
+
+* Age has almost normal distribution with a slight right skew
+* Duration is unimodal, right tailed
+* pdays - most values are 999. This indicates majority customers were not contacted in previous campaign
+* previous - Majority of he customers in the set were not contacted in previous campaign
+
+From the above distribution we can see pdays and previous are not significant indicators for predicting subscription to term deposit.
+
+For further understanding the dependence of subscription status on other variables we will see the correlation plots
+
+```{r}
+# Making a binary column for dependent variable
+
+bank_data <- 
+  bank_data %>% 
+    mutate(subscribed_binary = ifelse(subscribed == 'yes', 1, 0))
+
+bank_data %>% 
+    summarise(subscribed_binary =  round(mean(subscribed_binary)*100,1))
+
+
+# Correlation of dependent vs some features
+
+corrplot(cor(bank_data[,c('age','duration','campaign','pdays','previous','subscribed_binary')]), method = 'number') 
+
+# Correlation of dependent vs social and economic context attributes
+
+corrplot(cor(bank_data[,c('emp_var_rate','cons_price_idx','cons_conf_idx','euribor3m','nr_employed','subscribed_binary')]), method = 'number') 
+```
+
+From the correlation plots we observe that emp_var_rate, cons_price_idx, euribor3m, nr_employed are all highly correlated with each other. We will pick one among these and retain cons_conf_idx.
+
+## Model Fitting
+
+### Initial model 
+
+From our exploratory analysis we select age, default, poutcome and duration as our predictor variables for predicting subscription status. These 4 variables in our data shows most impact on the subscription status of our customer
+
+```{r}
+bank_model1 <- glm(subscribed_binary ~ age + default + poutcome + duration, family = binomial, data = bank_data)
+
+summary(bank_model1)
+
+# Brier score as model criterion
+
+bs <- function(y, prob) {  # this is a relative measure, like log loss/binomial deviance, SSE/RMSE, AIC/BIC, etc.
+  mean((prob - y) ^ 2)  # y should be in {0, 1}
+}
+
+# Compute Brier score for previous models
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model1, type = "response"))
+
+# Computing Brier score for model which always predict no
+
+bs(bank_data$subscribed_binary, prob = 0)
+
+# Computing Brier score for null model
+
+null_model <- glm(subscribed_binary ~ 1, family = binomial(link = "logit"), data = bank_data)
+
+summary(null_model)
+
+bs(bank_data$subscribed_binary, prob = predict(null_model, type = "response"))
+
+# Comparing ROC curves
+
+par(mfrow = c(1, 3))
+
+plot(roc1 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model1, type = "response")))
+roc1
+
+prob1 <- rep(0, 37070)
+plot(roc2 <- pROC::roc(bank_data$subscribed_binary, predictor =  prob1))
+roc2
+
+plot(roc3 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(null_model, type = "response")))
+roc3
+
+```
+
+From the above results we note initial mode with predictors age, default, poutcome and duration has performed better than the model which predicts no or intercept only model (null model).
+
+## Stepwise AIC
+
+From our initial model we conduct stepwise AIC to get a better variable selection. We will use variable select both direction to arrive at a model.
+
+
+```{r warning=FALSE}
+
+full_model <- glm(subscribed_binary ~ ., family = binomial(link = "logit"), data = bank_data[-c(21)])
+
+## StepAIC direction = "both"
+bank_model_stepaic <- MASS::stepAIC(bank_model1, direction = "both", trace = 0, scope = list(upper=full_model,lower=null_model))
+
+summary(bank_model_stepaic)
+
+## Computing Brier score for model
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model_stepaic, type = "response"))
+
+# Comparing ROC curves
+
+plot(roc4 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model_stepaic, type = "response")))
+roc4
+
+```
+
+We note using stepAIC function on our initial model both direction we get the model equation as
+
+$$subscribed binary = default + poutcome + duration + 
+    month + emp var rate + cons price idx + contact + euribor3m + 
+    job + pdays + day of week + campaign + cons conf idx$$
+    
+This model performs better in terms of brier score and ROC curve than our initial model. 
+
+### Stepwise AIC forward selection
+
+```{r}
+## StepAIC direction = "forward"
+bank_model_stepaic_forward <- MASS::stepAIC(null_model, direction = "forward", trace = 0, scope = list(upper=full_model,lower=null_model))
+
+summary(bank_model_stepaic_forward)
+
+## Computing Brier score for model
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model_stepaic_forward, type = "response"))
+
+# Comparing ROC curves
+
+plot(roc5 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model_stepaic_forward, type = "response")))
+roc5
+
+```
+Our forward selection model has sightly higher Brier Score than our previous model. 
+
+### Stepwise AIC backward elimination
+
+```{r}
+## StepAIC direction = "backward"
+bank_model_stepaic_backward <- MASS::stepAIC(full_model, direction = "backward", trace = 0)
+
+summary(bank_model_stepaic_backward)
+
+## Computing Brier score for model
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model_stepaic_backward, type = "response"))
+
+# Comparing ROC curves
+
+plot(roc6 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model_stepaic_backward, type = "response")))
+roc6
+```
+
+### Stepwise AIC interaction effect
+
+We check for interaction effect on our initial model
+
+```{r}
+## StepAIC 2 way interaction
+bank_model_stepaic_interaction <- stepAIC(bank_model1 ,direction = "both", scope = list("lower" = ~ 1, "upper" = ~ .^2),trace = 0)
+# bank_model_stepaic_interaction <- glm(formula = subscribed_binary ~ age + default + poutcome + duration + default:duration + age:default + age:duration + poutcome:duration, family = binomial, data = bank_data)
+summary(bank_model_stepaic_interaction)
+
+## Computing Brier score for model
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model_stepaic_interaction, type = "response"))
+
+# Comparing ROC curves
+
+plot(roc7 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model_stepaic_interaction, type = "response")))
+roc7
+```
+
+
+Our interaction model shows 2 way interaction between default and duration, age and default, age and duration and poutcome and duration. The model performance is not better than our forward selection or backward selection.
+
+
+## Final variable selection and model fit
+
+### Variable selection
+
+We will not directly take one of the above models as our final model. We will assess the variable importance finalize on our model.
+
+```{r}
+# checking variable importance
+
+library(vip)
+
+# Lets do the same thing using variable importance plots
+
+par(mfrow = c(1, 2))
+vip(bank_model_stepaic_backward, geom = "point", include_type = TRUE)
+vip(bank_model_stepaic_interaction, geom = "point", include_type = TRUE)
+```
+Based on the variable importance plot and our best performing model given step wise AIC backward elimination we will retain or drop the following variables 
+
+1. job - retain
+2. default - retain
+3. contact - retain
+4. month - dropped.Data is highly skewed. Most reach out happened in month of May
+5. day_of_week - dropped.We remove this as data is uniformly distributed across the week
+6. duration - dropped. This is current campaign data, we won't have access to it
+7. campaign - dropped. This is current campaign data, we won't have access to it
+8. pdays - retain
+9. poutcome - retain
+10. emp_var_rate - retain
+11. cons_price_idx - dropped. highly correlated with emp_var_rate
+12. cons_conf_idx - retain
+13. euribor3m - retain
+
+### Semi - final model
+
+```{r}
+bank_model_final <- glm(subscribed_binary ~ job + default + contact + pdays + poutcome + emp_var_rate + cons_conf_idx + euribor3m, family = binomial, data = bank_data)
+
+summary(bank_model_final)
+
+## Computing Brier score for model
+
+bs(bank_data$subscribed_binary, prob = predict(bank_model_final, type = "response"))
+
+# Comparing ROC curves
+
+plot(roc7 <- pROC::roc(bank_data$subscribed_binary, predictor =  predict(bank_model_final, type = "response")))
+roc7
+```
+Our semi-final model doesn't show the best performance in terms of Brier score or AUROC but this is fine as our other models could be over fitting the data. Also we have removed campaign dependent metrics like duration and campaign from the data to avoid any data leakage.
+
+## Final model
+```{r}
+# Fit a degree-2 MARS model (i.e., allow up to 2-way interaction effects)
+library(earth)
+lr.mars <- earth(subscribed_binary ~ . -duration -campaign, data = bank_data[-c(21)], 
+                 degree = 2, glm = list(family = binomial))
+
+# Print summary of model fit
+summary(lr.mars)
+
+plot(lr.mars)  # not terribly useful
+
+#variable importance as per mars model
+(vip2 <- vip(lr.mars, geom = "point",num_features = 20, include_type = TRUE))
+```
+Combining some of the important predictors from semi-final model as well as the above fitted MARS model,the final selected list of variables are: 
+
+$$job + contact + nr_employed + poutcome + month + emp_var_rate + cons_conf_idx + euribor3m + pdays + age + previous + day_of_week$$
+
+## Deploying our final model 
+```{r}
+## Reading bank new data 
+
+bank_new <- read.csv("D:/Downloads/bank_new.csv", stringsAsFactors = TRUE)
+
+bank_model_final1 <- glm(subscribed_binary ~  job + contact + nr_employed + poutcome + month + emp_var_rate + cons_conf_idx + euribor3m + pdays + age + previous + day_of_week, family = binomial, data = bank_data)
+
+
+predict_prob_m <- predict(bank_model_final1, newdata = bank_new[c('job', 'contact','nr_employed', 'poutcome', 'month', 'emp_var_rate', 'cons_conf_idx', 'euribor3m', 'pdays', 'age', 'previous', 'day_of_week')], type = "response")
+
+
+
+bank_new <- 
+  bank_new %>% 
+    mutate(subscribed_binary = ifelse(subscribed == 'yes', 1, 0))
+
+
+
+rms::val.prob(as.numeric(predict_prob_m), y = as.numeric(bank_new$subscribed_binary))
+
+# Compute Brier score for previous models
+
+bs(bank_new$subscribed_binary, predict_prob_m) # Similar Brier score as train data
+
+# Now lets pick the 500 top households as per our prediction and see how the model performs
+
+bank_new_wprob_m <- cbind(bank_new,predict_prob_m) 
+
+mean((bank_new_wprob_m %>% arrange(desc(predict_prob_m)))[1:500,c('subscribed_binary')]) 
+
+#printing 5 observations of top 500 customer's data as per the descending probability  
+head((bank_new_wprob_m %>% arrange(desc(predict_prob_m))),5)
+
+```
+
+Our logistic model can be described as $$(logit(P[subscribe = yes]| X = PredictorVariables)) = XB$$
+Thus, the probabilities obtained indicate the probabilities of subscribing.
+
+Thus, we have top 500 customers who have higher probabilities of subscribing than rest of the customers . Hence, these top 500 customers should be our target pool for making marketing decisions.  
